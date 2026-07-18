@@ -1,0 +1,37 @@
+# Keep the Docker build context small and free of things the image must not
+# contain. A smaller context = faster builds and no accidental secret leakage.
+
+# Python
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Tests are not needed in the production runtime image (they run in CI instead).
+app/tests/
+
+# VCS & CI
+.git/
+.github/
+.github/
+
+# Infra / other parts — not part of the app image
+k8s/
+helm/
+terraform/
+scripts/
+
+# Docs & local files
+*.md
+.env
+*.env
+.DS_Store
+.idea/
+.vscode/
+Dockerfile
+.dockerignore
