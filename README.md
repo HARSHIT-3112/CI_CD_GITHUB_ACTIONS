@@ -11,7 +11,7 @@ deployment — built incrementally as a learning + portfolio project.
 | Part | Topic | Status |
 |------|-------|--------|
 | 1 | Application (FastAPI service, health/readiness, 12-factor config) | ✅ done |
-| 2 | Multi-stage Dockerfile (small, non-root, secure image) | ⬜ |
+| 2 | Multi-stage Dockerfile (small, non-root, secure image) | ✅ done |
 | 3 | GitHub Actions CI (lint → test → build → scan → push) | ⬜ |
 | 4 | Kubernetes manifests (Deployment, Service, probes) | ⬜ |
 | 5 | Helm chart | ⬜ |
@@ -62,3 +62,47 @@ pytest app/tests/
 PORT=8080 python -m app.main
 curl localhost:8080/
 ```
+
+## Part 2 — Multi-stage Docker image
+
+A two-stage `Dockerfile` builds a small, non-root production image:
+
+- **Stage 1 (builder):** installs dependencies into an isolated virtualenv
+  (`/opt/venv`) using pip + build tooling.
+- **Stage 2 (runtime):** `python:3.12-slim` base with **no** build tooling —
+  copies in just the venv + app code, and runs as an unprivileged `app` user.
+
+Only the runtime stage ships. Design choices: `slim` (glibc) over `alpine`
+(musl) for wheel compatibility, non-root user, build-arg injection of
+`APP_VERSION`/`GIT_SHA`, a stdlib `HEALTHCHECK`, and a `.dockerignore` that keeps
+`.git`/`.venv`/tests/secrets out of the build context.
+
+### Build & run
+
+```bash
+# build, injecting version + commit
+docker build \
+  --build-arg GIT_SHA="$(git rev-parse --short HEAD)" \
+  --build-arg APP_VERSION="1.0.1" \
+  -t cicd-demo:1.0.1 .
+
+# run it (host 8083 -> container 8000)
+docker run -d --name demo -p 8083:8000 cicd-demo:1.0.1
+curl localhost:8083/version
+docker rm -f demo
+```
+
+### Security scanning (Trivy)
+
+```bash
+# app dependencies (should be clean; we keep pins current)
+trivy image --scanners vuln --severity HIGH,CRITICAL --pkg-types library cicd-demo:1.0.1
+
+# OS base packages (some CVEs are upstream-unfixable; CI gates on FIXABLE only — Part 3)
+trivy image --scanners vuln --severity HIGH,CRITICAL --pkg-types os cicd-demo:1.0.1
+```
+
+> **Lesson learned:** pinned deps give reproducibility but must be actively
+> bumped for security. The initial build flagged 3 HIGH `starlette` CVEs;
+> upgrading FastAPI/uvicorn cleared them. Base-image CVEs are handled by regular
+> rebuilds + a fixable-only CI gate.
