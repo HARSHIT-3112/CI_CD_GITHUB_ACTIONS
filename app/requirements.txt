@@ -1,0 +1,6 @@
+# Runtime dependencies ONLY. These are what ends up in the production image.
+# Pinned to exact versions for reproducible, deterministic builds — a core
+# requirement of a trustworthy pipeline (the image built today == the image
+# built next month from the same commit).
+fastapi==0.115.6
+uvicorn[standard]==0.34.0

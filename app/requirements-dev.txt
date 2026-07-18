@@ -1,0 +1,8 @@
+# Development & CI-only dependencies. Installed in the test job, NEVER shipped
+# in the production image. Keeping these separate keeps the runtime image small
+# and its attack surface minimal.
+-r requirements.txt
+
+pytest==8.3.4
+httpx==0.28.1          # required by FastAPI's TestClient
+ruff==0.8.4            # fast linter + formatter (used in CI's lint stage)
