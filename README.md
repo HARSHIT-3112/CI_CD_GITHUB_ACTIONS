@@ -14,7 +14,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 2 | Multi-stage Dockerfile (small, non-root, secure image) | ✅ done |
 | 3 | GitHub Actions CI (lint → test → build → scan → push) | ✅ done |
 | 4 | Kubernetes manifests (Deployment, Service, probes) | ✅ done |
-| 5 | Helm chart | ⬜ |
+| 5 | Helm chart | ✅ done |
 | 6 | Blue-green deployment | ⬜ |
 | 7 | Terraform (IaC) | ⬜ |
 | 8 | Vault (secrets management) | ⬜ |
@@ -192,3 +192,46 @@ kind delete cluster --name cicd
 >    load balancer — test load-balancing from inside the cluster instead.
 > 4. Local dev loads the image with `kind load` (bypasses registry + arch/auth);
 >    a real cluster pulls from GHCR with an `imagePullSecret`.
+
+## Part 5 — Helm chart
+
+`helm/cicd-demo/` packages the Part 4 manifests as a reusable, parameterized
+chart. Every hardcoded value now lives in `values.yaml` and is overridable per
+environment.
+
+```
+helm/cicd-demo/
+├── Chart.yaml          # version (chart) + appVersion (app/image)
+├── values.yaml         # all the knobs (replicas, image, config, resources, probes, security)
+└── templates/
+    ├── _helpers.tpl    # name/label helpers (DRY)
+    ├── configmap.yaml  # renders .Values.config into env
+    ├── deployment.yaml # checksum/config annotation auto-rolls pods on config change
+    ├── service.yaml
+    └── NOTES.txt       # post-install instructions
+```
+
+### Deploy with Helm
+
+```bash
+# render/validate without touching the cluster
+helm lint ./helm/cicd-demo
+helm template cicd-demo ./helm/cicd-demo --set image.tag=1.0.3
+
+# install or upgrade (idempotent) — creates the namespace
+helm upgrade --install cicd-demo ./helm/cicd-demo \
+  --namespace cicd-demo --create-namespace \
+  --set image.tag=1.0.3 --wait
+
+# change any value -> new revision, pods roll automatically
+helm upgrade cicd-demo ./helm/cicd-demo -n cicd-demo \
+  --set image.tag=1.0.3 --set config.GREETING="Hello from Helm — upgraded!" --wait
+
+# instant rollback + audit trail
+helm -n cicd-demo rollback cicd-demo 1
+helm -n cicd-demo history cicd-demo
+```
+
+> **Why this matters:** the *same chart* deploys any version to any environment
+> with different `--set`/`-f` values. Revisions give a full audit trail and
+> one-command rollback. This chart becomes the deploy unit for CD (Part 6).
