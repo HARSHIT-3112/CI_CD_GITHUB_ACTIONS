@@ -68,6 +68,12 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Container registry names must be lowercase, but the repo owner can
+      # contain uppercase. GitHub expressions have no lowercase() function, so
+      # we compute it in shell and override IMAGE_NAME for the rest of the job.
+      - name: Compute lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cicd-demo" >> "$GITHUB_ENV"
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
@@ -98,18 +104,29 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      # Install the Trivy CLI directly (the official install script). We run the
+      # CLI rather than the wrapper action to avoid a broken transitive pin in
+      # some trivy-action releases, and to keep the command identical to what we
+      # run locally.
+      - name: Install Trivy
+        run: |
+          curl -sfL https://raw.githubusercontent.com/aquasecurity/trivy/main/contrib/install.sh \
+            | sh -s -- -b /usr/local/bin v0.72.0
+          trivy --version
+
       # Security gate. --ignore-unfixed drops CVEs with no available fix (the
       # unpatchable base-image noise); the build FAILS on any FIXABLE
-      # HIGH/CRITICAL. exit-code 1 is what turns a finding into a failed job.
+      # HIGH/CRITICAL. --exit-code 1 is what turns a finding into a failed job.
       - name: Scan image (Trivy) — fail on fixable HIGH/CRITICAL
-        uses: aquasecurity/trivy-action@v0.30.0
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:sha-${{ github.sha }}
-          format: table
-          exit-code: "1"
-          ignore-unfixed: true
-          vuln-type: os,library
-          severity: HIGH,CRITICAL
+        run: |
+          trivy image \
+            --scanners vuln \
+            --ignore-unfixed \
+            --severity HIGH,CRITICAL \
+            --pkg-types os,library \
+            --exit-code 1 \
+            --no-progress \
+            "${IMAGE_NAME}:sha-${{ github.sha }}"
 
       # Only authenticate + publish on a real push to main — never for PRs.
       - name: Log in to GHCR
