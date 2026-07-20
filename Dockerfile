@@ -60,10 +60,12 @@ RUN apt-get update \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create an unprivileged system user/group. The container will run as this user,
-# never as root.
-RUN groupadd --system app \
-    && useradd --system --gid app --home-dir /app --shell /usr/sbin/nologin app
+# Create an unprivileged user/group with a FIXED NUMERIC UID/GID. The numeric id
+# matters: Kubernetes' `runAsNonRoot` can only verify a user is non-root when the
+# image declares a numeric UID (a username like "app" is unverifiable and the
+# pod is refused). 10001 is a common convention for app users.
+RUN groupadd --gid 10001 app \
+    && useradd --uid 10001 --gid 10001 --home-dir /app --shell /usr/sbin/nologin app
 
 WORKDIR /app
 
@@ -72,8 +74,9 @@ WORKDIR /app
 COPY --from=builder /opt/venv /opt/venv
 COPY app/ ./app/
 
-# Drop privileges: everything below and at runtime executes as 'app'.
-USER app
+# Drop privileges: everything below and at runtime executes as UID 10001.
+# Numeric form so Kubernetes can verify the container is non-root.
+USER 10001
 
 EXPOSE 8000
 

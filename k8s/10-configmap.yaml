@@ -1,0 +1,18 @@
+# A ConfigMap holds NON-SECRET configuration as key/value pairs. We inject these
+# into the container as environment variables (see deployment.yaml `envFrom`),
+# which is exactly the 12-factor config the app already reads (app/config.py).
+#
+# The same image runs unchanged; only this config differs per environment.
+# (Secrets — passwords, tokens — do NOT belong here; those come from Vault in
+# Part 8. A ConfigMap is plain text, visible to anyone with cluster read access.)
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cicd-demo-config
+  namespace: cicd-demo
+  labels:
+    app.kubernetes.io/name: cicd-demo
+data:
+  APP_ENV: "kind"
+  LOG_LEVEL: "INFO"
+  GREETING: "Hello from Kubernetes"

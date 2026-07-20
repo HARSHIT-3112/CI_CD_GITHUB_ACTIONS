@@ -1,0 +1,21 @@
+# A Service is a STABLE virtual IP + in-cluster DNS name that load-balances
+# across all READY pods matching its selector. Pods are ephemeral (random IPs,
+# replaced anytime); the Service name `cicd-demo` never changes.
+#
+# Only pods passing their readinessProbe receive traffic here — this is how
+# /health/ready gates real traffic, and the foundation of zero-downtime deploys.
+apiVersion: v1
+kind: Service
+metadata:
+  name: cicd-demo
+  namespace: cicd-demo
+  labels:
+    app.kubernetes.io/name: cicd-demo
+spec:
+  type: ClusterIP                  # internal-only; we reach it via port-forward
+  selector:
+    app.kubernetes.io/name: cicd-demo   # matches the pod labels in the Deployment
+  ports:
+    - name: http
+      port: 80                     # the Service listens on :80
+      targetPort: http             # forwards to the container's named 'http' port (8000)

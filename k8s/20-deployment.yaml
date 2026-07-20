@@ -1,0 +1,91 @@
+# A Deployment declares the DESIRED state: "run N identical replicas of this
+# image, and keep them running." Kubernetes continuously reconciles reality to
+# match. Changing the image here triggers a rolling update automatically.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cicd-demo
+  namespace: cicd-demo
+  labels:
+    app.kubernetes.io/name: cicd-demo
+spec:
+  replicas: 2                      # two pods -> we can SEE load-balancing + zero-downtime
+  selector:
+    # How the Deployment (and Service) find "their" pods: by matching labels.
+    matchLabels:
+      app.kubernetes.io/name: cicd-demo
+  template:
+    # The pod template. Every replica is stamped from this.
+    metadata:
+      labels:
+        app.kubernetes.io/name: cicd-demo
+    spec:
+      # Pod-level security: refuse to run as root, and use the default seccomp
+      # profile (restricts dangerous syscalls).
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001            # numeric UID (matches the image) so K8s can verify non-root
+        runAsGroup: 10001
+        fsGroup: 10001              # group-owns mounted volumes (e.g. the /tmp emptyDir)
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: app
+          # Local image loaded into kind (`kind load docker-image`). In a real
+          # cluster this would be ghcr.io/<owner>/cicd-demo:<tag> plus an
+          # imagePullSecret. IfNotPresent = use the loaded image, don't try to pull.
+          image: cicd-demo:1.0.3
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: http
+              containerPort: 8000
+          # Inject all ConfigMap keys as environment variables.
+          envFrom:
+            - configMapRef:
+                name: cicd-demo-config
+
+          # --- The Part 1 payoff: two DIFFERENT probes ---
+          # Liveness: "is the process wedged?" If this fails, K8s RESTARTS the pod.
+          # Points at /health/live, which never checks dependencies.
+          livenessProbe:
+            httpGet:
+              path: /health/live
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          # Readiness: "should this pod receive traffic?" If this fails, K8s
+          # removes the pod from the Service's rotation but does NOT restart it.
+          # Points at /health/ready.
+          readinessProbe:
+            httpGet:
+              path: /health/ready
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            failureThreshold: 3
+
+          # Resource requests (for scheduling) and limits (to protect the node).
+          # Production clusters often reject pods that omit these.
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 250m
+              memory: 128Mi
+
+          # Container-level hardening: no privilege escalation, read-only root
+          # filesystem, and drop all Linux capabilities.
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          # Because the root FS is read-only, give the app a writable /tmp.
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

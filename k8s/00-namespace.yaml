@@ -1,0 +1,9 @@
+# A Namespace is an isolated slice of the cluster. Putting our app in its own
+# namespace keeps its objects (pods, services, config) grouped and separate from
+# everything else — and lets us delete the whole app cleanly with one command.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cicd-demo
+  labels:
+    app.kubernetes.io/part-of: cicd-demo
