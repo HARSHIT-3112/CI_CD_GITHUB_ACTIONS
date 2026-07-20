@@ -13,7 +13,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 1 | Application (FastAPI service, health/readiness, 12-factor config) | ✅ done |
 | 2 | Multi-stage Dockerfile (small, non-root, secure image) | ✅ done |
 | 3 | GitHub Actions CI (lint → test → build → scan → push) | ✅ done |
-| 4 | Kubernetes manifests (Deployment, Service, probes) | ⬜ |
+| 4 | Kubernetes manifests (Deployment, Service, probes) | ✅ done |
 | 5 | Helm chart | ⬜ |
 | 6 | Blue-green deployment | ⬜ |
 | 7 | Terraform (IaC) | ⬜ |
@@ -142,3 +142,53 @@ Published image: `ghcr.io/<owner-lowercased>/cicd-demo` — tags `latest` (main)
 >    `lowercase()`.
 > 3. CI builds **linux/amd64** (runner arch); pulling on Apple Silicon needs
 >    `--platform linux/amd64`, or add a multi-arch buildx build later.
+
+## Part 4 — Kubernetes on a local `kind` cluster
+
+Raw manifests in `k8s/` (numeric-prefixed so `kubectl apply -f k8s/` runs them
+in dependency order):
+
+| File | Object | Notes |
+|------|--------|-------|
+| `00-namespace.yaml` | Namespace | Isolated `cicd-demo` namespace |
+| `10-configmap.yaml` | ConfigMap | Non-secret env (`APP_ENV`, `LOG_LEVEL`, `GREETING`) |
+| `20-deployment.yaml` | Deployment | 2 replicas, **liveness→`/health/live`**, **readiness→`/health/ready`**, resource requests/limits, hardened `securityContext` |
+| `30-service.yaml` | Service | ClusterIP load-balancing across ready pods |
+
+### Run it on kind
+
+```bash
+kind create cluster --name cicd
+
+# build + load the image straight into kind (no registry needed locally)
+docker build --build-arg APP_VERSION=1.0.3 \
+  --build-arg GIT_SHA="$(git rev-parse --short HEAD)" -t cicd-demo:1.0.3 .
+kind load docker-image cicd-demo:1.0.3 --name cicd
+
+kubectl apply -f k8s/
+kubectl -n cicd-demo rollout status deploy/cicd-demo
+
+# reach it: port-forward the Service (note: this tunnels to ONE pod)
+kubectl -n cicd-demo port-forward svc/cicd-demo 8085:80
+curl localhost:8085/
+
+# see REAL load-balancing (kube-proxy) from inside the cluster:
+kubectl run -n cicd-demo lb-test --image=cicd-demo:1.0.3 \
+  --image-pull-policy=IfNotPresent --restart=Never --attach --rm --quiet \
+  --command -- python -c "import urllib.request,json; \
+print([json.load(urllib.request.urlopen('http://cicd-demo/'))['served_by'] for _ in range(10)])"
+
+# tear down
+kind delete cluster --name cicd
+```
+
+> **Lessons learned:**
+> 1. `kubectl apply -f <dir>` runs files **alphabetically** — the namespace must
+>    sort first, hence numeric prefixes (`00-`, `10-`, ...).
+> 2. `runAsNonRoot: true` needs a **numeric** UID. A username (`app`) is
+>    unverifiable → `CreateContainerConfigError`. Fixed by `USER 10001` in the
+>    image + `runAsUser: 10001` in the manifest.
+> 3. `kubectl port-forward svc/...` forwards to a **single** pod, not through the
+>    load balancer — test load-balancing from inside the cluster instead.
+> 4. Local dev loads the image with `kind load` (bypasses registry + arch/auth);
+>    a real cluster pulls from GHCR with an `imagePullSecret`.
