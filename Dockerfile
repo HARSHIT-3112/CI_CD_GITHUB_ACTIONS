@@ -51,6 +51,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     APP_VERSION=${APP_VERSION} \
     GIT_SHA=${GIT_SHA}
 
+# Apply the latest OS security patches. A pinned base image freezes its Debian
+# packages in time; this pulls current security fixes so the scanner's
+# "fixable HIGH/CRITICAL" gate (Part 3 CI) stays green. Clean apt lists after to
+# keep the layer small. Still done as root, before we drop privileges.
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
 # Create an unprivileged system user/group. The container will run as this user,
 # never as root.
 RUN groupadd --system app \
