@@ -12,7 +12,7 @@ deployment — built incrementally as a learning + portfolio project.
 |------|-------|--------|
 | 1 | Application (FastAPI service, health/readiness, 12-factor config) | ✅ done |
 | 2 | Multi-stage Dockerfile (small, non-root, secure image) | ✅ done |
-| 3 | GitHub Actions CI (lint → test → build → scan → push) | ⬜ |
+| 3 | GitHub Actions CI (lint → test → build → scan → push) | ✅ done |
 | 4 | Kubernetes manifests (Deployment, Service, probes) | ⬜ |
 | 5 | Helm chart | ⬜ |
 | 6 | Blue-green deployment | ⬜ |
@@ -106,3 +106,39 @@ trivy image --scanners vuln --severity HIGH,CRITICAL --pkg-types os cicd-demo:1.
 > bumped for security. The initial build flagged 3 HIGH `starlette` CVEs;
 > upgrading FastAPI/uvicorn cleared them. Base-image CVEs are handled by regular
 > rebuilds + a fixable-only CI gate.
+
+## Part 3 — GitHub Actions CI
+
+`.github/workflows/ci.yml` runs on every push/PR to `main`:
+
+```
+push / PR ─► test ──────────────► build-scan-push  (needs: test)
+             • ruff lint            • buildx build (injects GIT_SHA/APP_VERSION)
+             • pytest               • Trivy scan (fail on FIXABLE HIGH/CRITICAL)
+                                    • push to GHCR   (main only; PRs skip push)
+```
+
+Design choices:
+
+- **Fail-fast gate:** `build-scan-push` declares `needs: test`, so a lint/test
+  failure blocks the build entirely.
+- **Security gate:** Trivy runs with `--ignore-unfixed --severity HIGH,CRITICAL
+  --exit-code 1`. Unpatchable base CVEs are ignored; any *fixable* HIGH/CRITICAL
+  fails the build. The image build applies `apt-get upgrade` so this stays green.
+- **No secrets:** publishes to **GHCR** using the built-in `GITHUB_TOKEN`
+  (`permissions: packages: write`) — no Docker Hub account or PAT.
+- **PRs build + scan but don't publish** (`if: github.event_name != 'pull_request'`).
+- Trivy is run via its **CLI** (install script), not the wrapper action, to avoid
+  a broken transitive pin and keep the command identical to local runs.
+
+Published image: `ghcr.io/<owner-lowercased>/cicd-demo` — tags `latest` (main) and
+`sha-<commit>`.
+
+> **Lessons learned (real failures we hit and fixed):**
+> 1. A non-existent action tag (`trivy-action@0.28.0`) fails at *"Set up job"* —
+>    GitHub resolves all `uses:` before running steps.
+> 2. Registry names must be **lowercase**; the owner had uppercase, so the image
+>    ref is computed in shell (`${OWNER,,}`) — GitHub expressions have no
+>    `lowercase()`.
+> 3. CI builds **linux/amd64** (runner arch); pulling on Apple Silicon needs
+>    `--platform linux/amd64`, or add a multi-arch buildx build later.
