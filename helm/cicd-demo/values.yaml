@@ -1,0 +1,70 @@
+# Default values for the cicd-demo chart. Every knob lives here; override any of
+# them at deploy time with `--set key=value` or `-f my-values.yaml`.
+# This is what makes ONE chart deploy any version to any environment.
+
+replicaCount: 2
+
+image:
+  repository: cicd-demo
+  # Empty tag falls back to Chart.appVersion. CI overrides this with the built
+  # image tag (e.g. --set image.tag=sha-<commit>).
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# Override the generated resource names if you ever need to.
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 80
+
+# Non-secret configuration, injected as environment variables (12-factor).
+# Rendered into a ConfigMap. Secrets (passwords/tokens) do NOT go here — those
+# come from Vault in Part 8.
+config:
+  APP_ENV: "helm"
+  LOG_LEVEL: "INFO"
+  GREETING: "Hello from Helm"
+
+resources:
+  requests:
+    cpu: 50m
+    memory: 64Mi
+  limits:
+    cpu: 250m
+    memory: 128Mi
+
+# Pod-level security context.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+# Container-level security context.
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop:
+      - ALL
+
+# Probes (whole spec is passed through, so you can tune any field via values).
+livenessProbe:
+  httpGet:
+    path: /health/live
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health/ready
+    port: http
+  initialDelaySeconds: 3
+  periodSeconds: 5
+  failureThreshold: 3

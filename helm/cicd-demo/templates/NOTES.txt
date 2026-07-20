@@ -1,0 +1,12 @@
+✅ {{ .Chart.Name }} (app {{ .Chart.AppVersion }}) deployed as release "{{ .Release.Name }}"
+   in namespace "{{ .Release.Namespace }}" (chart {{ .Chart.Name }}-{{ .Chart.Version }}).
+
+Check status:
+  kubectl -n {{ .Release.Namespace }} get pods,svc -l app.kubernetes.io/instance={{ .Release.Name }}
+
+Reach the service locally:
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "cicd-demo.fullname" . }} 8085:{{ .Values.service.port }}
+  curl http://localhost:8085/
+
+Roll back to the previous revision at any time:
+  helm -n {{ .Release.Namespace }} rollback {{ .Release.Name }}
