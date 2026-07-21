@@ -15,7 +15,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 3 | GitHub Actions CI (lint → test → build → scan → push) | ✅ done |
 | 4 | Kubernetes manifests (Deployment, Service, probes) | ✅ done |
 | 5 | Helm chart | ✅ done |
-| 6 | Blue-green deployment | ⬜ |
+| 6 | Blue-green deployment | ✅ done |
 | 7 | Terraform (IaC) | ⬜ |
 | 8 | Vault (secrets management) | ⬜ |
 | 9 | Docs & runbook | ⬜ |
@@ -235,3 +235,52 @@ helm -n cicd-demo history cicd-demo
 > **Why this matters:** the *same chart* deploys any version to any environment
 > with different `--set`/`-f` values. Revisions give a full audit trail and
 > one-command rollback. This chart becomes the deploy unit for CD (Part 6).
+
+## Part 6 — Blue-green deployment
+
+The chart renders **one Deployment per enabled color** (`blue`/`green`), each
+labelled `color: <c>`. The main Service selects `activeColor`; a preview Service
+selects `previewColor`. Cutover is an atomic Service-selector flip — no restarts.
+
+```
+        main Service (color=blue) ──100%──► ┌──────────┐
+                                            │  BLUE    │ v1.0.3  (live)
+   preview Service (color=green) ──test──►  ┌──────────┐
+                                            │  GREEN   │ v1.0.4  (idle, verifiable)
+        flip activeColor=green  ──────────► GREEN goes live; BLUE stays idle for rollback
+```
+
+### The blue-green flow
+
+```bash
+# 1. blue is live
+helm upgrade --install cicd-demo ./helm/cicd-demo -n cicd-demo \
+  --set activeColor=blue --set colors.blue.tag=1.0.3 --wait
+
+# 2. deploy green (new version) ALONGSIDE, traffic stays on blue
+helm upgrade cicd-demo ./helm/cicd-demo -n cicd-demo \
+  --set activeColor=blue \
+  --set colors.blue.tag=1.0.3 \
+  --set colors.green.enabled=true --set colors.green.tag=1.0.4 \
+  --set previewColor=green --wait
+
+# test green privately via the preview Service before any user sees it
+kubectl -n cicd-demo run t --image=cicd-demo:1.0.4 --restart=Never -i --rm --quiet \
+  --command -- python -c "import urllib.request;print(urllib.request.urlopen('http://cicd-demo-preview/').read())"
+
+# 3. cutover: flip the selector (instant)
+helm upgrade cicd-demo ./helm/cicd-demo -n cicd-demo --reuse-values --set activeColor=green --wait
+
+# 4. rollback if needed: flip back (blue never left)
+helm upgrade cicd-demo ./helm/cicd-demo -n cicd-demo --reuse-values --set activeColor=blue --wait
+```
+
+> **Lessons learned:**
+> - Cutover is near-instant but not perfectly atomic per-connection — there's a
+>   sub-second EndpointSlice propagation window. Production adds connection
+>   draining / readiness gates.
+> - Blue-green needs ~2× resources during overlap (both colors run). After a
+>   confident cutover you scale down / disable the old color.
+> - `color` is excluded from **selector** labels but present on pods, so one
+>   Service can target a specific color while the Deployment/pods share the app
+>   identity labels.
