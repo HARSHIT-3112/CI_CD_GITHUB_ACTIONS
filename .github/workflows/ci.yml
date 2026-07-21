@@ -1,12 +1,13 @@
-# CI pipeline: lint + test, then build + security-scan + publish the image.
+# CI/CD pipeline: lint + test, then build + security-scan + publish the image,
+# then deploy it to a throwaway Kubernetes cluster and smoke-test it.
 #
 # Flow:
-#   push / PR ─► test ─► build-scan-push (only pushes the image on main)
+#   push / PR ─► test ─► build-scan-push ─► deploy (main only)
 #
 # The image is published to GitHub Container Registry (GHCR) using the built-in
 # GITHUB_TOKEN — no external registry account or long-lived secret required.
 
-name: CI
+name: CI/CD
 
 # When does this run?
 on:
@@ -150,3 +151,75 @@ jobs:
             APP_VERSION=${{ github.ref_name }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # --------------------------------------------------------------------------- #
+  # Job 3 (CD): deploy the just-published image to a THROWAWAY kind cluster and
+  # smoke-test it. This proves the artifact actually deploys and serves — a real
+  # deployment gate — with no cloud account or secrets.
+  #
+  # For a REAL environment, you would instead point kubectl/helm at a persistent
+  # cluster: replace the "Create kind cluster" step with a step that writes a
+  # kubeconfig from a secret (e.g. ${{ secrets.KUBECONFIG }}) and drop the
+  # kind-load step (the cluster pulls from GHCR directly with an imagePullSecret).
+  # --------------------------------------------------------------------------- #
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build-scan-push
+    if: github.event_name != 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Compute lowercase image name
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/cicd-demo" >> "$GITHUB_ENV"
+
+      # Spin up an ephemeral single-node Kubernetes cluster on the runner.
+      - name: Create kind cluster
+        uses: helm/kind-action@v1.10.0
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      # Pull the image we just published, and load it into the kind cluster so no
+      # imagePullSecret is needed for this throwaway environment.
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Load image into kind
+        run: |
+          docker pull "${IMAGE_NAME}:sha-${{ github.sha }}"
+          kind load docker-image "${IMAGE_NAME}:sha-${{ github.sha }}" --name chart-testing
+
+      # Deploy with the SAME Helm chart used everywhere else, pointed at the GHCR
+      # image tag for this commit. Vault is off here (no Vault in this ephemeral
+      # cluster); the greeting falls back to the ConfigMap value.
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install cicd-demo ./helm/cicd-demo \
+            --namespace cicd-demo --create-namespace \
+            --set image.repository="${IMAGE_NAME}" \
+            --set colors.blue.tag="sha-${{ github.sha }}" \
+            --set colors.green.enabled=false \
+            --set vault.enabled=false \
+            --wait --timeout 120s
+          kubectl -n cicd-demo get pods,svc
+
+      # Smoke test: hit the live Service and assert a healthy, well-formed response.
+      - name: Smoke test the deployment
+        run: |
+          kubectl -n cicd-demo port-forward svc/cicd-demo 8080:80 &
+          PF_PID=$!
+          sleep 5
+          echo "--- /health/ready ---"
+          curl -fsS localhost:8080/health/ready
+          echo; echo "--- / ---"
+          curl -fsS localhost:8080/ | tee /tmp/resp.json
+          echo
+          # Fail the job if the response is missing the expected field.
+          grep -q '"served_by"' /tmp/resp.json
+          kill $PF_PID 2>/dev/null || true
+          echo "✅ deployment smoke test passed"
