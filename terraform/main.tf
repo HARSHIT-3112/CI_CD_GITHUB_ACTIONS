@@ -57,4 +57,8 @@ resource "helm_release" "app" {
     name  = "colors.green.tag"
     value = var.green_tag
   }
+  set {
+    name  = "vault.enabled"
+    value = var.vault_enabled
+  }
 }

@@ -65,3 +65,9 @@ variable "green_tag" {
   type        = string
   default     = "1.0.4"
 }
+
+variable "vault_enabled" {
+  description = "Enable Vault Agent secret injection (needs image >= 1.0.5)."
+  type        = bool
+  default     = false
+}

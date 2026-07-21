@@ -43,3 +43,12 @@ version (which does change).
 app.kubernetes.io/name: {{ include "cicd-demo.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
+
+{{/* The ServiceAccount name to use (defaults to the fullname). */}}
+{{- define "cicd-demo.serviceAccountName" -}}
+{{- if .Values.serviceAccount.create -}}
+{{- default (include "cicd-demo.fullname" .) .Values.serviceAccount.name -}}
+{{- else -}}
+{{- default "default" .Values.serviceAccount.name -}}
+{{- end -}}
+{{- end -}}

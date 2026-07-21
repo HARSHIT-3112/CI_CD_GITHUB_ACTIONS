@@ -12,3 +12,6 @@ active_color  = "blue"
 blue_tag      = "1.0.3"
 green_enabled = true
 green_tag     = "1.0.4"
+
+# Vault secret injection (needs image >= 1.0.5 on both tracks)
+vault_enabled = false

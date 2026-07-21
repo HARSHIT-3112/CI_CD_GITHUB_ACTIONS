@@ -32,7 +32,25 @@ service:
   type: ClusterIP
   port: 80
 
+# The pod's identity. Vault authorizes secret access by ServiceAccount, so the
+# app needs a dedicated one (not the namespace 'default').
+serviceAccount:
+  create: true
+  name: ""        # defaults to the fullname (cicd-demo)
+
+# Vault secret injection (Part 8). When enabled, the Vault Agent Injector adds an
+# init container that authenticates with the pod's ServiceAccount, reads the
+# secret, and writes it to /vault/secrets/greeting — which the app reads via
+# GREETING_FILE. The secret value never appears in git, the image, or a ConfigMap.
+vault:
+  enabled: false
+  role: cicd-demo
+  secretPath: secret/data/cicd-demo   # kv-v2 path
+  secretKey: greeting
+
 # Non-secret configuration, injected as environment variables (12-factor).
+# NOTE: GREETING is here only as the NON-secret fallback for local/dev. When
+# vault.enabled=true, the real greeting comes from Vault and overrides this.
 config:
   APP_ENV: "helm"
   LOG_LEVEL: "INFO"

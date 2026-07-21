@@ -26,10 +26,21 @@ spec:
     metadata:
       annotations:
         checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
+        {{- if $.Values.vault.enabled }}
+        # These annotations tell the Vault Agent Injector to add an init container
+        # that authenticates as this pod's ServiceAccount, reads the secret, and
+        # renders it to /vault/secrets/greeting for the app to read.
+        vault.hashicorp.com/agent-inject: "true"
+        vault.hashicorp.com/agent-inject-status: "update"
+        vault.hashicorp.com/role: {{ $.Values.vault.role | quote }}
+        vault.hashicorp.com/agent-inject-secret-greeting: {{ $.Values.vault.secretPath | quote }}
+        vault.hashicorp.com/agent-inject-template-greeting: {{ printf `{{- with secret "%s" -}}{{ .Data.data.%s }}{{- end -}}` $.Values.vault.secretPath $.Values.vault.secretKey | quote }}
+        {{- end }}
       labels:
         {{- include "cicd-demo.selectorLabels" $ | nindent 8 }}
         color: {{ $color }}
     spec:
+      serviceAccountName: {{ include "cicd-demo.serviceAccountName" $ }}
       securityContext:
         {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       containers:
@@ -40,6 +51,12 @@ spec:
           env:
             - name: COLOR
               value: {{ $color | quote }}
+            {{- if $.Values.vault.enabled }}
+            # Tell the app to read its greeting (the secret) from the file the
+            # Vault agent injects, instead of the plain ConfigMap env var.
+            - name: GREETING_FILE
+              value: /vault/secrets/greeting
+            {{- end }}
           ports:
             - name: http
               containerPort: 8000
