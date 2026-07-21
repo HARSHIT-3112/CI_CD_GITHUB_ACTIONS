@@ -17,7 +17,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 5 | Helm chart | ✅ done |
 | 6 | Blue-green deployment | ✅ done |
 | 7 | Terraform (IaC) | ✅ done |
-| 8 | Vault (secrets management) | ⬜ |
+| 8 | Vault (secrets management) | ✅ done |
 | 9 | Docs & runbook | ⬜ |
 
 ## Part 1 — The application
@@ -323,3 +323,55 @@ terraform destroy                           # tear it all down
 >   (`*.tfstate`) and real `*.tfvars` (they can hold secrets).
 > - Driving Helm through Terraform means one `plan`/`apply`/`destroy` covers
 >   infra **and** app together.
+
+## Part 8 — Vault (secrets management)
+
+Secrets must never live in git, images, ConfigMaps, or manifest env vars. Vault
+stores them once (encrypted, audited) and delivers them to pods **at runtime**,
+authenticated by the pod's **ServiceAccount identity** — no static password.
+
+We use the **Vault Agent Injector**: pod annotations add an init container that
+authenticates to Vault, reads the secret, and renders it to a memory-backed file
+`/vault/secrets/greeting`. The app reads that file (`GREETING_FILE`).
+
+```
+pod (SA: cicd-demo) ─► injector adds vault-agent-init
+   init authenticates via Kubernetes auth ─► Vault checks role/policy ─► allowed
+   secret rendered to /vault/secrets/greeting (tmpfs) ─► app reads it at startup
+```
+
+### Set it up (dev-mode Vault on kind)
+
+```bash
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm install vault hashicorp/vault -n vault --create-namespace \
+  --set server.dev.enabled=true --set server.dev.devRootToken=root
+
+# store the secret + configure k8s auth, policy, and a role bound to the app SA
+kubectl -n vault exec vault-0 -- sh -c '
+  export VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=root
+  vault kv put secret/cicd-demo greeting="…secret…"
+  vault auth enable kubernetes
+  vault write auth/kubernetes/config kubernetes_host="https://kubernetes.default.svc:443"
+  vault policy write cicd-demo - <<EOF
+path "secret/data/cicd-demo" { capabilities = ["read"] }
+EOF
+  vault write auth/kubernetes/role/cicd-demo \
+    bound_service_account_names=cicd-demo \
+    bound_service_account_namespaces=cicd-demo policies=cicd-demo ttl=1h'
+
+# deploy with injection on (image >= 1.0.5 reads GREETING_FILE)
+cd terraform && terraform apply -var vault_enabled=true -var blue_tag=1.0.5 -var green_tag=1.0.5
+```
+
+The secret then appears in the app's response but is absent from the ConfigMap,
+the image env, and git.
+
+> **Lessons learned:**
+> - The injector template annotation contains Vault's own `{{ }}` — render it via
+>   Helm `printf` with a backtick string so Helm doesn't try to interpret it.
+> - Vault authorizes by **ServiceAccount**, so the app needs a dedicated SA that
+>   the Vault role is bound to (name + namespace must match).
+> - Injected pods gain an init container + a `vault-agent` sidecar (pods show 2/2).
+> - `server.dev.enabled=true` is for LEARNING ONLY (in-memory, auto-unsealed, root
+>   token). Production Vault is HA, persistent, sealed, and audited.
