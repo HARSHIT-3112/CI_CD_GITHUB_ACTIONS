@@ -1,0 +1,14 @@
+# Copy to terraform.tfvars and adjust. terraform.tfvars is gitignored (it can
+# hold environment-specific or sensitive values); this example is committed.
+
+kube_context  = "kind-cicd"
+namespace     = "cicd-demo"
+release_name  = "cicd-demo"
+
+replica_count = 2
+
+# Blue-green controls
+active_color  = "blue"
+blue_tag      = "1.0.3"
+green_enabled = true
+green_tag     = "1.0.4"
