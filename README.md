@@ -16,7 +16,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 4 | Kubernetes manifests (Deployment, Service, probes) | ✅ done |
 | 5 | Helm chart | ✅ done |
 | 6 | Blue-green deployment | ✅ done |
-| 7 | Terraform (IaC) | ⬜ |
+| 7 | Terraform (IaC) | ✅ done |
 | 8 | Vault (secrets management) | ⬜ |
 | 9 | Docs & runbook | ⬜ |
 
@@ -284,3 +284,42 @@ helm upgrade cicd-demo ./helm/cicd-demo -n cicd-demo --reuse-values --set active
 > - `color` is excluded from **selector** labels but present on pods, so one
 >   Service can target a specific color while the Deployment/pods share the app
 >   identity labels.
+
+## Part 7 — Terraform (Infrastructure as Code)
+
+`terraform/` manages the app environment declaratively: a `kubernetes_namespace`
+plus a `helm_release` of our chart, via the `kubernetes` and `helm` providers.
+The kind cluster stands in for cloud infra — in AWS/GCP a cluster module (EKS/GKE)
+would be added here and the providers pointed at its outputs.
+
+```
+terraform/
+├── versions.tf     # pinned Terraform + provider versions
+├── providers.tf    # kubernetes + helm, targeting the kind-cicd context
+├── main.tf         # kubernetes_namespace + helm_release
+├── variables.tf    # image tags, replicas, blue-green active_color (validated)
+├── outputs.tf      # namespace, release, status
+└── terraform.tfvars.example
+```
+
+### Usage
+
+```bash
+cd terraform
+terraform init
+terraform plan                              # preview the diff
+terraform apply                             # build the whole env from code
+terraform apply -var active_color=green     # blue-green cutover, as code
+terraform output                            # namespace/release/status
+terraform destroy                           # tear it all down
+```
+
+> **Lessons learned:**
+> - `terraform` is no longer in homebrew-core (BSL license) — install from
+>   `hashicorp/tap`.
+> - Terraform only manages what it created; the manually-installed Helm release
+>   had to be removed first so Terraform could own it (alternative: `terraform import`).
+> - Commit `.terraform.lock.hcl` (pins provider versions); **gitignore** state
+>   (`*.tfstate`) and real `*.tfvars` (they can hold secrets).
+> - Driving Helm through Terraform means one `plan`/`apply`/`destroy` covers
+>   infra **and** app together.
