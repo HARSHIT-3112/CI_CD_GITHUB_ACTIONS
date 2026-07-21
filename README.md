@@ -3,8 +3,29 @@
 An end-to-end, automated path from `git push` to a running, zero-downtime
 deployment — built incrementally as a learning + portfolio project.
 
-> **Status:** work in progress. Built one part at a time; each part is
-> independently runnable.
+> **Status:** all 9 parts complete. Each part is independently runnable and
+> documented below with its own "lessons learned".
+
+## The pipeline at a glance
+
+```
+   git push
+      │
+      ▼
+ ┌─────────────────────── GitHub Actions (CI/CD) ───────────────────────┐
+ │  test ──► build-scan-push ──────────────────► deploy                 │
+ │  ruff    multi-stage Docker build             kind cluster in CI     │
+ │  pytest  Trivy scan (fixable HIGH/CRITICAL)   helm upgrade --install │
+ │          push image to GHCR                   smoke test the Service │
+ └──────────────────────────────────────────────────────────────────────┘
+      │  same Helm chart, same image
+      ▼
+ ┌──────────────────────── Kubernetes (kind) ───────────────────────────┐
+ │  Terraform ─► Namespace + Helm release                               │
+ │  Helm chart ─► blue / green Deployments  ◄─ Service selector flip     │
+ │  Vault Agent ─► injects secrets at runtime (never in git/image/CM)    │
+ └──────────────────────────────────────────────────────────────────────┘
+```
 
 ## Roadmap
 
@@ -18,7 +39,7 @@ deployment — built incrementally as a learning + portfolio project.
 | 6 | Blue-green deployment | ✅ done |
 | 7 | Terraform (IaC) | ✅ done |
 | 8 | Vault (secrets management) | ✅ done |
-| 9 | Docs & runbook | ⬜ |
+| 9 | Continuous Deployment (deploy + smoke test in CI) | ✅ done |
 
 ## Part 1 — The application
 
@@ -375,3 +396,53 @@ the image env, and git.
 > - Injected pods gain an init container + a `vault-agent` sidecar (pods show 2/2).
 > - `server.dev.enabled=true` is for LEARNING ONLY (in-memory, auto-unsealed, root
 >   token). Production Vault is HA, persistent, sealed, and audited.
+
+## Part 9 — Continuous Deployment (CD)
+
+The CI workflow gains a third job, `deploy` (`needs: build-scan-push`, main only),
+that closes the loop from push to *verified running*:
+
+```
+deploy job:
+  create ephemeral kind cluster (on the runner)
+  ─► pull the GHCR image for this commit, kind-load it
+  ─► helm upgrade --install (the SAME chart) with the commit's image tag
+  ─► port-forward the Service and smoke-test /health/ready and /
+```
+
+The smoke test fails the job if the deployed app doesn't answer 200 with a
+well-formed response — a real deployment gate, no cloud account or secrets needed.
+
+> **Targeting a real cluster:** replace the "Create kind cluster" step with one
+> that writes a kubeconfig from a secret (`${{ secrets.KUBECONFIG }}`) and drop
+> the `kind load` step (a real cluster pulls from GHCR via an `imagePullSecret`).
+> Everything else — the Helm release, the values, the smoke test — is identical.
+
+---
+
+## Bring the whole stack up locally
+
+```bash
+# 1. cluster
+kind create cluster --name cicd
+
+# 2. build + load images
+for v in 1.0.3 1.0.4 1.0.5; do
+  docker build --build-arg APP_VERSION=$v \
+    --build-arg GIT_SHA="$(git rev-parse --short HEAD)" -t cicd-demo:$v .
+  kind load docker-image cicd-demo:$v --name cicd
+done
+
+# 3. Vault (dev) + configure (see Part 8 for the exec block)
+helm repo add hashicorp https://helm.releases.hashicorp.com
+helm install vault hashicorp/vault -n vault --create-namespace \
+  --set server.dev.enabled=true --set server.dev.devRootToken=root
+
+# 4. deploy everything via Terraform
+cd terraform && terraform init && \
+  terraform apply -auto-approve -var vault_enabled=true -var blue_tag=1.0.5 -var green_tag=1.0.5
+
+# teardown
+terraform destroy -auto-approve
+kind delete cluster --name cicd
+```
