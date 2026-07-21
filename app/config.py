@@ -50,6 +50,10 @@ class Settings:
     # a plain env var. For now it is just a harmless string.
     greeting: str = os.getenv("GREETING", "Hello from the CI/CD pipeline")
 
+    # Which blue-green "color" track this instance belongs to (Part 6). Injected
+    # by the Deployment. Surfaced in responses so a cutover is visible.
+    color: str = os.getenv("COLOR", "none")
+
 
 # A single shared instance the rest of the app imports.
 settings = Settings()

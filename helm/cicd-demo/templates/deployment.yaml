@@ -1,48 +1,64 @@
+{{/*
+Render ONE Deployment per enabled color (blue / green). Each track is a complete,
+independent set of pods, labelled with `color: <blue|green>`. The Service selects
+which color actually receives traffic — so both can run at once and cutover is a
+selector flip, never a pod restart.
+
+`$` is the root context (needed because `range` rebinds `.`).
+*/}}
+{{- range $color, $spec := .Values.colors }}
+{{- if $spec.enabled }}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: {{ include "cicd-demo.fullname" . }}
+  name: {{ include "cicd-demo.fullname" $ }}-{{ $color }}
   labels:
-    {{- include "cicd-demo.labels" . | nindent 4 }}
+    {{- include "cicd-demo.labels" $ | nindent 4 }}
+    color: {{ $color }}
 spec:
-  replicas: {{ .Values.replicaCount }}
+  replicas: {{ $.Values.replicaCount }}
   selector:
     matchLabels:
-      {{- include "cicd-demo.selectorLabels" . | nindent 6 }}
+      {{- include "cicd-demo.selectorLabels" $ | nindent 6 }}
+      color: {{ $color }}
   template:
     metadata:
       annotations:
-        # Roll the pods automatically whenever the ConfigMap content changes:
-        # the checksum changes -> the pod template changes -> a new rollout.
-        # Without this, editing config would NOT restart pods to pick it up.
-        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") $ | sha256sum }}
       labels:
-        {{- include "cicd-demo.selectorLabels" . | nindent 8 }}
+        {{- include "cicd-demo.selectorLabels" $ | nindent 8 }}
+        color: {{ $color }}
     spec:
       securityContext:
-        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+        {{- toYaml $.Values.podSecurityContext | nindent 8 }}
       containers:
-        - name: {{ .Chart.Name }}
-          # Empty .Values.image.tag falls back to the chart's appVersion.
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+        - name: {{ $.Chart.Name }}
+          image: "{{ $.Values.image.repository }}:{{ $spec.tag | default $.Chart.AppVersion }}"
+          imagePullPolicy: {{ $.Values.image.pullPolicy }}
+          # The app surfaces this in its responses, so a cutover is visible.
+          env:
+            - name: COLOR
+              value: {{ $color | quote }}
           ports:
             - name: http
               containerPort: 8000
           envFrom:
             - configMapRef:
-                name: {{ include "cicd-demo.fullname" . }}-config
+                name: {{ include "cicd-demo.fullname" $ }}-config
           livenessProbe:
-            {{- toYaml .Values.livenessProbe | nindent 12 }}
+            {{- toYaml $.Values.livenessProbe | nindent 12 }}
           readinessProbe:
-            {{- toYaml .Values.readinessProbe | nindent 12 }}
+            {{- toYaml $.Values.readinessProbe | nindent 12 }}
           resources:
-            {{- toYaml .Values.resources | nindent 12 }}
+            {{- toYaml $.Values.resources | nindent 12 }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- toYaml $.Values.securityContext | nindent 12 }}
           volumeMounts:
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: tmp
           emptyDir: {}
+{{- end }}
+{{- end }}

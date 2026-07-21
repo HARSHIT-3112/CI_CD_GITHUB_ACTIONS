@@ -1,3 +1,6 @@
+# The MAIN service: routes 100% of production traffic to the ACTIVE color only.
+# Cutover = change .Values.activeColor and `helm upgrade` — this selector flips
+# atomically and traffic moves instantly, with no pod restarts.
 apiVersion: v1
 kind: Service
 metadata:
@@ -8,6 +11,7 @@ spec:
   type: {{ .Values.service.type }}
   selector:
     {{- include "cicd-demo.selectorLabels" . | nindent 4 }}
+    color: {{ .Values.activeColor }}
   ports:
     - name: http
       port: {{ .Values.service.port }}

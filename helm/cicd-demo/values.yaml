@@ -1,17 +1,30 @@
 # Default values for the cicd-demo chart. Every knob lives here; override any of
 # them at deploy time with `--set key=value` or `-f my-values.yaml`.
-# This is what makes ONE chart deploy any version to any environment.
 
 replicaCount: 2
 
 image:
   repository: cicd-demo
-  # Empty tag falls back to Chart.appVersion. CI overrides this with the built
-  # image tag (e.g. --set image.tag=sha-<commit>).
-  tag: ""
   pullPolicy: IfNotPresent
 
-# Override the generated resource names if you ever need to.
+# ---------------------------------------------------------------------------- #
+# Blue-green deployment (Part 6)
+# ---------------------------------------------------------------------------- #
+# Two independent "color" tracks can run at once. The main Service routes 100%
+# of traffic to `activeColor`; a separate preview Service routes to
+# `previewColor` so you can test the idle color BEFORE cutting over. Cutover is
+# just flipping `activeColor` (an atomic Service-selector change).
+activeColor: blue
+previewColor: green
+
+colors:
+  blue:
+    enabled: true
+    tag: "1.0.3"
+  green:
+    enabled: false
+    tag: "1.0.4"
+
 nameOverride: ""
 fullnameOverride: ""
 
@@ -20,8 +33,6 @@ service:
   port: 80
 
 # Non-secret configuration, injected as environment variables (12-factor).
-# Rendered into a ConfigMap. Secrets (passwords/tokens) do NOT go here — those
-# come from Vault in Part 8.
 config:
   APP_ENV: "helm"
   LOG_LEVEL: "INFO"
@@ -35,7 +46,6 @@ resources:
     cpu: 250m
     memory: 128Mi
 
-# Pod-level security context.
 podSecurityContext:
   runAsNonRoot: true
   runAsUser: 10001
@@ -44,7 +54,6 @@ podSecurityContext:
   seccompProfile:
     type: RuntimeDefault
 
-# Container-level security context.
 securityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true
@@ -52,7 +61,6 @@ securityContext:
     drop:
       - ALL
 
-# Probes (whole spec is passed through, so you can tune any field via values).
 livenessProbe:
   httpGet:
     path: /health/live

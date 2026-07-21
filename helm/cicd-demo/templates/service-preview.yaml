@@ -1,0 +1,24 @@
+{{/*
+The PREVIEW service: routes to the idle (preview) color so you can smoke-test the
+new version BEFORE cutting production over to it. Only rendered when the preview
+color is actually enabled/deployed.
+*/}}
+{{- $preview := .Values.previewColor -}}
+{{- if and $preview (index .Values.colors $preview) (index .Values.colors $preview).enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "cicd-demo.fullname" . }}-preview
+  labels:
+    {{- include "cicd-demo.labels" . | nindent 4 }}
+    role: preview
+spec:
+  type: {{ .Values.service.type }}
+  selector:
+    {{- include "cicd-demo.selectorLabels" . | nindent 4 }}
+    color: {{ $preview }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+{{- end }}

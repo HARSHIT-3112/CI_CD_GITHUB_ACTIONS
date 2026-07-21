@@ -89,6 +89,7 @@ async def root() -> dict:
         "environment": settings.environment,
         "version": settings.version,
         "git_sha": settings.git_sha,
+        "color": settings.color,
         "served_by": HOSTNAME,
     }
 
